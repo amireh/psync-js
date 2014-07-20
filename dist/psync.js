@@ -1,0 +1,1 @@
+define("psync",["require","pixy","lodash","rsvp"],function(r){{var e;r("pixy"),r("lodash"),r("rsvp")}return e});

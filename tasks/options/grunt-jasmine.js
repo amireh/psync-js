@@ -1,7 +1,7 @@
 module.exports = {
   src: [],
   options : {
-    timeout: 10000,
+    timeout: 1000,
     outfile: 'tests.html',
 
     host: 'http://127.0.0.1:<%= grunt.config.get("connect.tests.options.port") %>/',

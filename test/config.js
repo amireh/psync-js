@@ -12,7 +12,7 @@ requirejs.config({
   paths: {
     'pixy': '../node_modules/pixy/dist/pixy',
     'pixy-jasmine': '../node_modules/pixy/dist/pixy-jasmine',
-    'lodash': '../node_modules/lodash/dist/lodash',
+    'lodash': '../node_modules/pixy/vendor/underscore',
     'rsvp': '../node_modules/pixy/dist/pixy',
     'router': '../node_modules/pixy/dist/pixy',
     'inflection': '../node_modules/pixy/vendor/inflection',
