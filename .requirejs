@@ -1,0 +1,11 @@
+requirejs.config({
+  paths: {
+    'lodash': '../node_modules/lodash/dist/lodash',
+    'pixy': '../node_modules/pixy/dist/pixy',
+    'rsvp': 'pixy',
+  },
+
+  shim: {
+    'lodash': { exports: '_' },
+  }
+});
