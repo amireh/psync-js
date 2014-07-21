@@ -197,8 +197,7 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
 
   extend(Journal.prototype, Evented, {
     /**
-     * Add an operation entry on a given model to the journal, e.g, journal
-     * the model operation.
+     * Log an operation on a model to the journal.
      *
      * @param {"create"|"update"|"delete"} opcode
      *        The operation code.
@@ -305,6 +304,7 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
 
   return journal;
 });
+
 /* jshint -W098 */
 define('psync/player/resolver',['require','inflection','../error','psync/config'],function(require) {
   var InflectionJS = require('inflection');
