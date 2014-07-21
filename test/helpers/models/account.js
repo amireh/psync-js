@@ -9,7 +9,7 @@ define(function(require) {
 
     transactionModel: TransactionModel,
 
-    baseUrl: function() {
+    urlRoot: function() {
       return this.collection.user.url() + '/accounts';
     },
 

@@ -7,7 +7,7 @@ define(function(require) {
       name: 'Guest'
     },
 
-    url: '/users',
+    urlRoot: '/users',
 
     accountModel: AccountModel,
 

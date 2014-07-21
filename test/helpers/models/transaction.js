@@ -7,7 +7,7 @@ define(function(require) {
       note: ''
     },
 
-    baseUrl: function() {
+    urlRoot: function() {
       return this.collection.account.url() + '/transactions';
     }
   });
