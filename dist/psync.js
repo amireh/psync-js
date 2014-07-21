@@ -69,6 +69,48 @@ define('psync/config',['require','lodash','./util/evented'],function(require) {
 
   config.debug = false;
 
+  config.optimized = true;
+  config.optimizer = {
+    /**
+     * @cfg {Boolean} discardDeleted
+     *
+     * This optimization will discard CREATE and UPDATE entries for resources
+     * that have been deleted (e.g, have a DELETE entry).
+     *
+     * This optimizer deals with two cases:
+     *
+     * == Case 1: Shadow resources
+     *
+     * If the resource being deleted is a shadow one, then *all* entries for
+     * that resource are discarded.
+     *
+     * == Case 2: Persistent resources
+     *
+     * Since a persistent resource can only have UPDATE entries, then only those
+     * will be discarded by this optimizer.
+     */
+    discardDeleted: true,
+
+    /**
+     * @cfg {Boolean} singleUpdates
+     *
+     * This optimization will not allow duplicate UPDATE entries for the same
+     * resource. Instead, it will keep the latest entry and discard the rest.
+     */
+    singleUpdates: true,
+
+    /**
+     * @cfg {Boolean} mungeUpdates
+     *
+     * This optimization will merge UPDATE entries for a shadow resource that is
+     * just being created (e.g, has a CREATE entry) so that the CREATE entry
+     * reflects the latest local version of the resource.
+     *
+     * Be aware that this uses lodash _.merge() to merge the data.
+     */
+    mungeUpdates: true
+  };
+
   extend(beacon, Evented);
 
   config.trigger = beacon.trigger.bind(beacon);
@@ -76,6 +118,25 @@ define('psync/config',['require','lodash','./util/evented'],function(require) {
   config.off = beacon.off.bind(beacon);
 
   return config;
+});
+define('psync/util/wrap',[],function() {
+  /** @internal Array wrap. */
+  return function wrap(item) {
+    return item ? Array.isArray(item) ? item : [ item ] : [];
+  };
+});
+
+define('psync/util/remove_by_value',[],function() {
+  /** @internal Remove a record. */
+  return function removeByvalue(record, set) {
+    var index;
+
+    index = set.indexOf(record);
+
+    if (index !== -1) {
+      set.splice(index, 1);
+    }
+  };
 });
 define('psync/journal/processors/create',['require','psync/config'],function(require) {
   var config = require('psync/config');
@@ -119,22 +180,34 @@ define('psync/journal/processors/delete',['require','psync/config'],function(req
     }
   };
 });
-define('psync/journal',['require','lodash','psync/config','psync/util/evented','./journal/processors/create','./journal/processors/update','./journal/processors/delete'],function(require) {
+define('psync/journal/length_of_record',['require','psync/util/wrap'],function(require) {
+  var wrap = require('psync/util/wrap');
+  var keys = Object.keys;
+
+  /** @internal Get the number of operation entries in a record. */
+  var lengthOf = function(record) {
+    return keys(record.operations).reduce(function(count, opcode) {
+      return count += wrap(record.operations[opcode]).length;
+    }, 0);
+  };
+
+  return lengthOf;
+});
+define('psync/journal',['require','lodash','psync/config','psync/util/evented','psync/util/wrap','psync/util/remove_by_value','./journal/processors/create','./journal/processors/update','./journal/processors/delete','./journal/length_of_record'],function(require) {
   var _ = require('lodash');
   var config = require('psync/config');
   var Evented = require('psync/util/evented');
+  var wrap = require('psync/util/wrap');
+  var remove = require('psync/util/remove_by_value');
   var createProcessor = require('./journal/processors/create');
   var updateProcessor = require('./journal/processors/update');
   var deleteProcessor = require('./journal/processors/delete');
+  var lengthOf = require('./journal/length_of_record');
   var extend = _.extend;
   var findWhere = _.findWhere;
   var keys = Object.keys;
   var journal;
 
-  /** @internal Array wrap. */
-  var wrap = function(item) {
-    return item ? Array.isArray(item) ? item : [ item ] : [];
-  };
 
   var getRecord = function(path, set) {
     return findWhere(set, { path: path });
@@ -168,30 +241,16 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
     }
   };
 
-  /** @internal Remove a record. */
-  var remove = function(record, set) {
-    var index;
-
-    index = set.indexOf(record);
-
-    if (index !== -1) {
-      set.splice(index, 1);
-    }
-  };
-
-  /** @internal Get the number of operation entries in a record. */
-  var lengthOf = function(record) {
-    return keys(record.operations).reduce(function(count, opcode) {
-      return count += wrap(record.operations[opcode]).length;
-    }, 0);
-  };
-
   var Journal = function() {
     this.records = [];
     return this;
   };
 
   var onChange = function() {
+    // internal event, don't hook into this!
+    journal.trigger('preprocess');
+
+    // hook into this one instead
     journal.trigger('change');
   };
 
@@ -229,6 +288,7 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
       }
 
       if (entry) {
+        entry.timestamp = Date.now();
         append(record, opcode, entry);
         onChange();
       }
@@ -253,10 +313,6 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
 
       if (record) {
         if (removeEntry(record, opcode, entry)) {
-          if (!lengthOf(record)) {
-            remove(record, this.records);
-          }
-
           onChange();
 
           return true;
@@ -279,6 +335,10 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
       return getRecord(path, this.records);
     },
 
+    getRecords: function() {
+      return this.records;
+    },
+
     getEntries: function(path, opcode) {
       var record = this.get(path);
 
@@ -289,6 +349,16 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
 
     toJSON: function() {
       return { records: this.records };
+    },
+
+    /**
+     * @private
+     *
+     * Used by modules like the persistence layer to broadcast manual/direct
+     * changes to the journal.
+     */
+    emitChange: function() {
+      onChange();
     }
   });
 
@@ -1040,6 +1110,20 @@ define('psync/persistence',['require','psync/config','psync/journal'],function(r
     enabled = false;
   };
 
+  var load = exports.load = function() {
+    var serializedJournal = localStorage.getItem('journal');
+    var records;
+
+    if (serializedJournal) {
+      records = JSON.parse(serializedJournal);
+
+      journal.records = records;
+      journal.emitChange();
+
+      return true;
+    }
+  };
+
   config.on('change', function() {
     if (config.persistent) {
       enable();
@@ -1051,13 +1135,212 @@ define('psync/persistence',['require','psync/config','psync/journal'],function(r
 
   return exports;
 });
-define('psync',['require','./psync/error','./psync/journal','./psync/player','./psync/config','./psync/adapters/pixy','./psync/persistence'],function(require) {
+define('psync/journal_optimizer/config',['require','psync/config','psync/journal'],function(require) {
+  var config = require('psync/config');
+  var journal = require('psync/journal');
+  var enabled;
+  var runner;
+
+  var enable = function() {
+    if (enabled) {
+      return;
+    }
+
+    journal.on('preprocess', runner);
+    enabled = true;
+  };
+
+  var disable = function() {
+    if (!enabled) {
+      return;
+    }
+
+    journal.off('preprocess', runner);
+    enabled = false;
+  };
+
+  config.on('change', function() {
+    if (config.optimized) {
+      enable();
+    }
+    else {
+      disable();
+    }
+  });
+
+  return function(_runner) {
+    runner = _runner;
+
+    if (config.optimized) {
+      enable();
+    }
+  };
+});
+define('psync/journal_optimizer',['require','psync/config','psync/journal','psync/journal/length_of_record','psync/util/wrap','psync/util/remove_by_value','./journal_optimizer/config','lodash'],function(require) {
+  var config = require('psync/config');
+  var journal = require('psync/journal');
+  var lengthOf = require('psync/journal/length_of_record');
+  var wrap = require('psync/util/wrap');
+  var removeByValue = require('psync/util/remove_by_value');
+  var enabler = require('./journal_optimizer/config');
+  var _ = require('lodash');
+  var exports = {};
+  var uniq = _.uniq;
+  var where = _.where;
+  var findWhere = _.findWhere;
+  var merge = _.merge;
+  var sortBy = _.sortBy;
+  var mapBy = _.map;
+
+  /**
+   * Pick the latest UPDATE entry for every resource, and discard older ones.
+   *
+   * @internal
+   * @impure Side-effects on:
+   *
+   *  - record.operations.update
+   */
+  var discardOldUpdates = function(record) {
+    var entries = record.operations.update;
+    var ids = entries.map(function(entry) {
+      return entry.id;
+    });
+
+    record.operations.update = uniq(ids).map(function(id) {
+      var resourceEntries = where(entries, { id: id });
+
+      if (resourceEntries.length === 1) {
+        return resourceEntries[0];
+      }
+
+      resourceEntries = sortBy(resourceEntries, 'timestamp');
+
+      return resourceEntries[resourceEntries.length-1];
+    });
+  };
+
+  /**
+   * For every resource that has a CREATE entry, locate an UPDATE entry,
+   * merge its data with the CREATE one, then discard it.
+   *
+   * @internal
+   * @impure Side-effects on:
+   *
+   *   - record.operations.update
+   *   - record.operations.create
+   */
+  var mungeUpdates = function(record) {
+    mapBy(record.operations.update, 'id').forEach(function(id) {
+      var updates = record.operations.update;
+      var createEntry = findWhere(record.operations.create, { id: id });
+      var updateEntry;
+
+      if (createEntry) {
+        updateEntry = findWhere(record.operations.update, { id: id });
+        merge(createEntry.data, updateEntry.data);
+        removeByValue(updateEntry, updates);
+      }
+    });
+  };
+
+  /**
+   * Remove empty records.
+   *
+   * @internal
+   * @impure Side-effects on:
+   *
+   *  - journal.records
+   */
+  var discardEmptyRecords = function() {
+    var paths = journal.records.map(function(record) {
+      return record.path;
+    });
+
+    paths.forEach(function(path) {
+      var record = findWhere(journal.records, { path: path });
+
+      if (record && !lengthOf(record)) {
+        removeByValue(record, journal.records);
+      }
+    });
+  };
+
+  /**
+   * Discard CREATE or UPDATE entries for resources that have been deleted.
+   *
+   * @internal
+   * @impure Side effects on:
+   *
+   *  - record.operations.create
+   *  - record.operations.update
+   */
+  var discardDeletedEntries = function(record) {
+    var otherOpcodes = [ 'create', 'update' ];
+    var removeEntry = function(entries, id) {
+      var entry = findWhere(entries, { id: id });
+
+      if (!entry) {
+        return;
+      }
+
+      removeByValue(entry, entries);
+
+      return removeEntry(entries, id);
+    };
+
+    record.operations['delete'].forEach(function(deleteEntry) {
+      otherOpcodes.forEach(function(opcode) {
+        var entries = where(record.operations[opcode], { id: deleteEntry.id });
+
+        if (entries.length) {
+          removeEntry(record.operations[opcode], deleteEntry.id);
+        }
+      });
+    });
+  };
+
+  var optimizeRecords = function() {
+    journal.getRecords().forEach(function(record) {
+      var hasDeletes, hasCreates, hasUpdates;
+
+      if (config.optimizer.discardDeleted) {
+        hasDeletes = wrap(record.operations.delete).length;
+
+        if (hasDeletes) {
+          discardDeletedEntries(record);
+        }
+      }
+
+      hasUpdates = wrap(record.operations.update).length;
+
+      if (hasUpdates) {
+        if (config.optimizer.singleUpdates) {
+          discardOldUpdates(record);
+        }
+
+        hasCreates = wrap(record.operations.create).length;
+
+        if (config.optimizer.mungeUpdates && hasCreates) {
+          mungeUpdates(record);
+        }
+      }
+    });
+
+    discardEmptyRecords();
+  };
+
+  enabler(optimizeRecords);
+
+  return exports;
+});
+define('psync',['require','./psync/error','./psync/journal','./psync/player','./psync/config','./psync/adapters/pixy','./psync/persistence','./psync/journal_optimizer'],function(require) {
   var onError = require('./psync/error');
   var Journal = require('./psync/journal');
   var Player = require('./psync/player');
   var config = require('./psync/config');
   var PixyAdapter = require('./psync/adapters/pixy');
   var Persistence = require('./psync/persistence');
+  var Optimizer = require('./psync/journal_optimizer');
   var exports;
 
   exports = {};
