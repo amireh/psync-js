@@ -35,7 +35,7 @@ define(function(require) {
         expect(Psync.journal.length).toEqual(1);
         expect(Psync.journal.getEntries('/users', 'create')).toContain({
           id: user.cid,
-          data: user.toJSON()
+          data: user.toPsync()
         });
       });
 

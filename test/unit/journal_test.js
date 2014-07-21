@@ -6,6 +6,8 @@ define(function(require) {
     describe('Events', function() {
       var user, onChange;
 
+      jasmine.PixySuite.call(this);
+
       beforeEach(function() {
         onChange = jasmine.createSpy('onChange');
         user = Models.UserCollection.push({});
