@@ -229,7 +229,11 @@ define(function(require) {
 
         this.flush();
 
-        expect(onChange).toHaveBeenCalledWith('1');
+        expect(onChange).toHaveBeenCalledWith('1', {
+          path: '/users/1/accounts/1/transactions',
+          rollingBack: false,
+          selfOrigin: false
+        });
       });
     });
 
@@ -276,7 +280,7 @@ define(function(require) {
           expect(account.transactions.length).toEqual(0);
         });
 
-        it('should trigger the #delete event', function() {
+        it('should emit the @delete event', function() {
           var onCreate = jasmine.createSpy('onCreate');
           var onDelete = jasmine.createSpy('onDelete');
 
@@ -305,20 +309,16 @@ define(function(require) {
           this.flush();
 
           expect(onCreate).not.toHaveBeenCalled();
-          expect(onDelete).toHaveBeenCalled();
-         });
+          expect(onDelete).toHaveBeenCalledWith('1', {
+            path: '/users/1/accounts/1/transactions',
+            rollingBack: true,
+            selfOrigin: true
+          });
+        });
       });
 
-      xdescribe('UPDATE', function() {
+      describe('UPDATE', function() {
         beforeEach(function() {
-
-          user.accounts.reset([{
-            id: '1',
-            links: {
-              transactions: '/users/1/accounts/1/transactions'
-            }
-          }]);
-
           user.accounts.get('1').transactions.reset([{
             id: '1',
             amount: 10,
@@ -326,17 +326,19 @@ define(function(require) {
           }]);
         });
 
-        it('should fetch a newly-updated resource', function() {
+        it('should re-fetch the resource', function() {
+          var request;
+
           Subject({
-            processed: [{
+            dropped: [{
               path: "/users/1/accounts/1/transactions",
               operations: {
-                update: [{ id: '1' }]
+                update: [{ id: '1', error: {} }]
               }
             }]
-          });
+          }, true);
 
-          var request = this.requests[0];
+          request = this.requests[0];
 
           expect(this.requests.length).toEqual(1);
           expect(request.url).toEqual('/users/1/accounts/1/transactions/1');
@@ -349,73 +351,74 @@ define(function(require) {
           expect(user.accounts.get('1').transactions.get('1').get('amount')).toEqual(20);
         });
 
-        it('should fetch an updated resource that doesnt exist locally', function() {
+        it('should emit the @update event', function() {
+          var onUpdate = jasmine.createSpy('onUpdate');
+
+          Subject.on('transactions:update', onUpdate);
+
           Subject({
-            processed: [{
+            dropped: [{
               path: "/users/1/accounts/1/transactions",
               operations: {
-                update: [{ id: '2' }]
+                update: [{ id: '1', error: {} }]
               }
             }]
-          });
+          }, true);
 
-          var request = this.requests[0];
-
-          expect(this.requests.length).toEqual(1);
-          expect(request.url).toEqual('/users/1/accounts/1/transactions/2');
-
-          this.respondTo(request, 200, {}, {
-            id: '2',
+          this.respondTo(this.requests[0], 200, {}, {
+            id: '1',
             amount: 20
           });
 
-          expect(user.accounts.get('1').transactions.get('2').get('amount')).toEqual(20);
+          expect(onUpdate).toHaveBeenCalled();
         });
       });
 
-      xdescribe('DELETE', function() {
-        beforeEach(function() {
-          user.accounts.reset([{
-            id: '1',
-            links: {
-              transactions: '/users/1/accounts/1/transactions'
-            }
-          }]);
-
-          user.accounts.get('1').transactions.reset([{
-            id: '1',
-            amount: 10,
-            href: '/users/1/accounts/1/transactions/1'
-          }]);
-        });
-
-        it('should remove a resource', function() {
+      describe('DELETE', function() {
+        it('should re-create a resource', function() {
           Subject({
-            processed: [{
+            dropped: [{
               path: "/users/1/accounts/1/transactions",
               operations: {
-                "delete": [{ id: '1' }]
+                "delete": [{ id: '1', error: {} }]
               }
             }]
+          }, true);
+
+          expect(this.requests.length).toEqual(1);
+          expect(this.requests[0].url).toEqual('/users/1/accounts/1/transactions/1');
+
+          this.respondTo(this.requests[0], 200, {}, {
+            id: '1',
+            amount: 20
           });
 
-          expect(this.requests.length).toEqual(0);
-          expect(user.accounts.get('1').transactions.get('1')).toBeFalsy();
-          expect(user.accounts.get('1').transactions.length).toEqual(0);
-        });
-
-        it('should be a NOOP if the resource doesnt exist', function() {
-          Subject({
-            processed: [{
-              path: "/users/1/accounts/1/transactions",
-              operations: {
-                "delete": [{ id: '2' }]
-              }
-            }]
-          });
-
-          expect(this.requests.length).toEqual(0);
           expect(user.accounts.get('1').transactions.length).toEqual(1);
+        });
+
+        it('should emit the @create event', function() {
+          var onCreate = jasmine.createSpy('onCreate');
+          var onDelete = jasmine.createSpy('onDelete');
+
+          Subject.on('transactions:create', onCreate);
+          Subject.on('transactions:delete', onDelete);
+
+          Subject({
+            dropped: [{
+              path: "/users/1/accounts/1/transactions",
+              operations: {
+                "delete": [{ id: '1', error: {} }]
+              }
+            }]
+          }, true);
+
+          this.respondTo(this.requests[0], 200, {}, {
+            id: '1',
+            amount: 20
+          });
+
+          expect(onCreate).toHaveBeenCalled();
+          expect(onDelete).not.toHaveBeenCalled();
         });
       });
     });
