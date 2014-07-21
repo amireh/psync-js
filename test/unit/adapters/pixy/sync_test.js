@@ -3,21 +3,9 @@ define(function(require) {
   var PixySuite = require('test/support/pixy_suite');
   var ModelMixin = require('psync/adapters/pixy/model');
   var BaseUser = require('test/helpers/models/user');
-  var BaseAccount = require('test/helpers/models/account');
-  var BaseTransaction = require('test/helpers/models/transaction');
-
-  var Transaction = BaseTransaction.extend({
-    mixins: [ ModelMixin ]
-  });
-
-  var Account = BaseAccount.extend({
-    mixins: [ ModelMixin ],
-    transactionModel: Transaction
-  });
 
   var User = BaseUser.extend({
-    mixins: [ ModelMixin ],
-    accountModel: Account
+    mixins: [ ModelMixin ]
   });
 
   describe('Psync.Pixy.sync', function() {
@@ -32,7 +20,7 @@ define(function(require) {
     });
 
     describe('CREATE', function() {
-      it('should work', function() {
+      beforeEach(function() {
         spyOn(User.prototype, 'psync').and.returnValue({
           collectionKey: 'users'
         });
@@ -41,8 +29,9 @@ define(function(require) {
           user.save();
           flush();
         }).not.toThrow();
+      });
 
-        expect(this.requests[0].url).toEqual('/users');
+      it('should work', function() {
         expect(Psync.journal.length).toEqual(1);
         expect(Psync.journal.getEntries('/users', 'create')).toContain({
           id: user.cid,
@@ -51,16 +40,6 @@ define(function(require) {
       });
 
       it('should remove the entry if it was successfully synced', function() {
-        spyOn(User.prototype, 'psync').and.returnValue({
-          collectionKey: 'users'
-        });
-
-        expect(function() {
-          user.save();
-          flush();
-        }).not.toThrow();
-
-        expect(this.requests[0].url).toEqual('/users');
         expect(Psync.journal.length).toEqual(1);
 
         this.respondTo(this.requests[0], 200, {
@@ -69,6 +48,33 @@ define(function(require) {
         this.flush();
 
         expect(Psync.journal.records).toEqual([]);
+      });
+
+      it('should remove the entry on 400 or 422 remote errors', function() {
+        expect(Psync.journal.length).toEqual(1);
+
+        this.respondTo(this.requests[0], 400, {
+        });
+
+        expect(Psync.journal.records).toEqual([]);
+      });
+
+      it('should not remove the entry on other remote errors', function() {
+        expect(Psync.journal.length).toEqual(1);
+
+        this.respondTo(this.requests[0], 500, {});
+
+        expect(Psync.journal.length).toEqual(1);
+      });
+
+      it('should not add an entry on local validation failures', function() {
+        Psync.journal.clear();
+        spyOn(User.prototype, '_validate').and.returnValue(false);
+
+        user.save();
+        this.flush();
+
+        expect(Psync.journal.length).toEqual(0);
       });
     });
   });
