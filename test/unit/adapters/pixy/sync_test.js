@@ -33,11 +33,13 @@ define(function(require) {
       });
 
       it('should work', function() {
+        var entry;
+
         expect(journal.length).toEqual(1);
-        expect(journal.getEntries('/users', 'create')).toContain({
-          id: user.cid,
-          data: user.toPsync()
-        });
+        entry = journal.getEntries('/users', 'create')[0];
+
+        expect(entry.id).toEqual(user.cid);
+        expect(entry.data).toEqual(user.toPsync());
       });
 
       it('should remove the entry if it was successfully synced', function() {
