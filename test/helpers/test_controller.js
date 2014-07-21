@@ -1,5 +1,5 @@
 require([ 'psync' ],function(Psync) {
   beforeEach(function() {
-    Psync.journal.clear();
+    Psync.Journal.clear();
   });
 });

@@ -3,7 +3,7 @@ define(function(require) {
   var Player = require('psync/player');
   var Pixy = require('pixy');
   var User = require('test/helpers/models/user');
-  var Subject = Player;
+  var Player = Player;
 
   describe('Player', function() {
     var collection, user, account, userCollection, lastRootScope;
@@ -42,7 +42,7 @@ define(function(require) {
         });
 
         it('should create a resource', function() {
-          Subject({
+          Player.play({
             processed: [{
               path: "/users/1/accounts/1/transactions",
               operations: {
@@ -63,7 +63,7 @@ define(function(require) {
         });
 
         it('should not create a resource if it could not be fetched', function() {
-          Subject({
+          Player.play({
             processed: [{
               path: "/users/1/accounts/1/transactions",
               operations: {
@@ -87,7 +87,7 @@ define(function(require) {
         it('should be a NOOP if the resource exists', function() {
           user.accounts.get('1').transactions.push({ id: '1' });
 
-          Subject({
+          Player.play({
             processed: [{
               path: "/users/1/accounts/1/transactions",
               operations: {
@@ -110,7 +110,7 @@ define(function(require) {
         });
 
         it('should fetch a newly-updated resource', function() {
-          Subject({
+          Player.play({
             processed: [{
               path: "/users/1/accounts/1/transactions",
               operations: {
@@ -133,7 +133,7 @@ define(function(require) {
         });
 
         it('should fetch an updated resource that doesnt exist locally', function() {
-          Subject({
+          Player.play({
             processed: [{
               path: "/users/1/accounts/1/transactions",
               operations: {
@@ -166,7 +166,7 @@ define(function(require) {
         });
 
         it('should remove a resource', function() {
-          Subject({
+          Player.play({
             processed: [{
               path: "/users/1/accounts/1/transactions",
               operations: {
@@ -181,7 +181,7 @@ define(function(require) {
         });
 
         it('should be a NOOP if the resource doesnt exist', function() {
-          Subject({
+          Player.play({
             processed: [{
               path: "/users/1/accounts/1/transactions",
               operations: {
@@ -199,7 +199,7 @@ define(function(require) {
         var onChange = jasmine.createSpy('onChange');
         var request, args;
 
-        Subject.on('transactions:create', onChange);
+        Player.on('transactions:create', onChange);
 
         user.accounts.reset([{
           id: '1',
@@ -208,7 +208,7 @@ define(function(require) {
           }
         }]);
 
-        Subject({
+        Player.play({
           processed: [{
             path: "/users/1/accounts/1/transactions",
             operations: {
@@ -245,7 +245,7 @@ define(function(require) {
             amount: -5
           }]);
 
-          Subject({
+          Player.play({
             dropped: [{
               path: '/users/1/accounts/1/transactions',
               operations: {
@@ -267,7 +267,7 @@ define(function(require) {
 
         it('should be a NOOP if the resource does not exist', function() {
           expect(function() {
-            Subject({
+            Player.play({
               dropped: [{
                 path: '/users/1/accounts/1/transactions',
                 operations: {
@@ -284,15 +284,15 @@ define(function(require) {
           var onCreate = jasmine.createSpy('onCreate');
           var onDelete = jasmine.createSpy('onDelete');
 
-          Subject.on('transactions:create', onCreate);
-          Subject.on('transactions:delete', onDelete);
+          Player.on('transactions:create', onCreate);
+          Player.on('transactions:delete', onDelete);
 
           account.transactions.reset([{
             id: '1',
             amount: -5
           }]);
 
-          Subject({
+          Player.play({
             dropped: [{
               path: '/users/1/accounts/1/transactions',
               operations: {
@@ -329,7 +329,7 @@ define(function(require) {
         it('should re-fetch the resource', function() {
           var request;
 
-          Subject({
+          Player.play({
             dropped: [{
               path: "/users/1/accounts/1/transactions",
               operations: {
@@ -354,9 +354,9 @@ define(function(require) {
         it('should emit the @update event', function() {
           var onUpdate = jasmine.createSpy('onUpdate');
 
-          Subject.on('transactions:update', onUpdate);
+          Player.on('transactions:update', onUpdate);
 
-          Subject({
+          Player.play({
             dropped: [{
               path: "/users/1/accounts/1/transactions",
               operations: {
@@ -376,7 +376,7 @@ define(function(require) {
 
       describe('DELETE', function() {
         it('should re-create a resource', function() {
-          Subject({
+          Player.play({
             dropped: [{
               path: "/users/1/accounts/1/transactions",
               operations: {
@@ -400,10 +400,10 @@ define(function(require) {
           var onCreate = jasmine.createSpy('onCreate');
           var onDelete = jasmine.createSpy('onDelete');
 
-          Subject.on('transactions:create', onCreate);
-          Subject.on('transactions:delete', onDelete);
+          Player.on('transactions:create', onCreate);
+          Player.on('transactions:delete', onDelete);
 
-          Subject({
+          Player.play({
             dropped: [{
               path: "/users/1/accounts/1/transactions",
               operations: {

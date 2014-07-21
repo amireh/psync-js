@@ -1,14 +1,41 @@
-module.exports = {
-  compile: {
-    options: {
-      baseUrl: './lib',
-      out: 'dist/psync.js',
-      mainConfigFile: '.requirejs',
-      optimize: 'uglify2',
+var _ = require('lodash');
+var extend = _.extend;
 
-      removeCombined:           false,
-      inlineText:               true,
-      preserveLicenseComments:  false,
+var baseConfig = {
+  baseUrl: './lib',
+  mainConfigFile: '.requirejs',
+
+  removeCombined:           false,
+  inlineText:               true,
+  preserveLicenseComments:  false,
+
+  pragmas: {
+    production: true
+  },
+
+  paths: {
+    'pixy': 'empty:',
+    'rsvp': 'empty:',
+    'inflection': 'empty:',
+    'lodash': 'empty:',
+  },
+
+  name: 'psync',
+  deps: [ 'psync' ]
+};
+
+module.exports = {
+  development: {
+    options: extend({}, baseConfig, {
+      out: 'dist/psync.js',
+      optimize: 'none',
+    })
+  },
+
+  production: {
+    options: extend({}, baseConfig, {
+      out: 'dist/psync.min.js',
+      optimize: 'uglify2',
 
       uglify2: {
         warnings: true,
@@ -26,19 +53,7 @@ module.exports = {
           if_return:  true,
           join_vars:  true
         }
-      },
-
-      pragmas: {
-        production: true
-      },
-
-      paths: {
-        'pixy': 'empty:',
-        'lodash': 'empty:',
-        'rsvp': 'empty:',
-      },
-
-      name: 'psync'
-    }
-  }
+      }
+    })
+  },
 };
