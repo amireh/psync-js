@@ -37,6 +37,8 @@ define('psync/config',['require','lodash','./util/evented'],function(require) {
   var config = {};
   var beacon = (function() { return this; })();
 
+  config.enabled = true;
+
   /**
    * @cfg {Psync.Adapter} adapter
    *
@@ -71,6 +73,15 @@ define('psync/config',['require','lodash','./util/evented'],function(require) {
 
   config.optimized = true;
   config.optimizer = {
+    /**
+     * @cfg {Boolean} discardEmptyRecords
+     *
+     * This optimization will remove all records that have no operation entries
+     * anymore (either due to other optimization effects, or because of normal
+     * removals).
+     */
+    discardEmptyRecords: true,
+
     /**
      * @cfg {Boolean} discardDeleted
      *
@@ -311,7 +322,11 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
       var path = config.adapter.getPathFor(model);
       var record = getRecord(path, this.records);
 
-      if (record) {
+      return this.removeEntry(record, opcode, entry);
+    },
+
+    removeEntry: function(record, opcode, entry) {
+      if (record && entry) {
         if (removeEntry(record, opcode, entry)) {
           onChange();
 
@@ -752,6 +767,63 @@ define('psync/player',['require','pixy','rsvp','./player/traverse'],function(req
     }
   };
 
+  /**
+   * @class Player
+   *
+   * An implementation of the Psync recording player. The player provides the
+   * ability to re-play a journal, committing the "processed" records, and
+   * rolling back "dropped" ones.
+   *
+   * The player provides an evented interface for consuming playback events.
+   *
+   * === Resource-based events
+   *
+   * For each entry that gets played back, an event will be emitted by the
+   * Player with the id of the resource path.
+   *
+   * For example, to listen to playbacks of the "create" operation on Article
+   * resources (whenever an Article is created by the Player):
+   *
+   *     Player.on('articles:create', function(resourceId, context) {
+   *     });
+   *
+   * The available events are: "create", "update", and "delete".
+   *
+   * === The generic "change" event
+   *
+   * If you're interested in generic-processing of playback events, you can
+   * listen to the "change" event and use the event parameters to locate the
+   * resource.
+   *
+   * Example:
+   *
+   *     Player.on('change', function(resourceId, context) {
+   *       var resourcePath = context.path;
+   *
+   *       // lookup the resource using resourceId + resourcePath
+   *       var resource;
+   *
+   *       // ...
+   *     });
+   *
+   * === Synopsis of the playback event
+   *
+   * @param {String} event.resourceId
+   *        The ID of the resource that was operated on.
+   *
+   * @param {Object} event.context
+   *        The player context at the time the entry was played out.
+   *
+   * @param {String} event.context.path
+   *        The Psync path of the resource.
+   *
+   * @param {Boolean} event.context.rollingBack
+   *        True if this was a roll-back playback, e.g, from a "dropped" record.
+   *
+   * @param {Boolean} event.context.selfOrigin
+   *        The value you provided to Player#play(). See the method's docs
+   *        for more on this parameter.
+   */
   var Player = function() {
     return this;
   };
@@ -799,6 +871,36 @@ define('psync/player',['require','pixy','rsvp','./player/traverse'],function(req
   singleton = new Player();
 
   return singleton;
+});
+define('psync/configure',['require','./config','./error'],function(require) {
+  var config = require('./config');
+  var onError = require('./error');
+  var previousValues = {};
+
+  var configure = function(key, value) {
+    var oldValue;
+
+    if (!config.hasOwnProperty(key)) {
+      return onError("Unknown Psync configuration property '" + key + "'");
+    }
+
+    oldValue = config[key];
+
+    if (value !== undefined) {
+      previousValues[key] = config[key];
+
+      config[key] = value;
+      config.trigger('change', key, value, previousValues[key]);
+    }
+
+    return oldValue;
+  };
+
+  configure.restore = function(key) {
+    configure(key, previousValues[key]);
+  };
+
+  return configure;
 });
 define('psync/adapters/pixy/sync',['require','pixy','lodash','psync/journal','psync/config'],function(require) {
   var Pixy = require('pixy');
@@ -1112,12 +1214,12 @@ define('psync/persistence',['require','psync/config','psync/journal'],function(r
 
   var load = exports.load = function() {
     var serializedJournal = localStorage.getItem('journal');
-    var records;
+    var data;
 
     if (serializedJournal) {
-      records = JSON.parse(serializedJournal);
+      data = JSON.parse(serializedJournal);
 
-      journal.records = records;
+      journal.records = data.records || [];
       journal.emitChange();
 
       return true;
@@ -1326,24 +1428,28 @@ define('psync/journal_optimizer',['require','psync/config','psync/journal','psyn
       }
     });
 
-    discardEmptyRecords();
+    if (config.optimizer.discardEmptyRecords) {
+      discardEmptyRecords();
+    }
   };
 
   enabler(optimizeRecords);
 
   return exports;
 });
-define('psync',['require','./psync/error','./psync/journal','./psync/player','./psync/config','./psync/adapters/pixy','./psync/persistence','./psync/journal_optimizer'],function(require) {
+define('psync',['require','./psync/error','./psync/journal','./psync/player','./psync/config','./psync/configure','./psync/adapters/pixy','./psync/persistence','./psync/journal_optimizer'],function(require) {
   var onError = require('./psync/error');
   var Journal = require('./psync/journal');
   var Player = require('./psync/player');
   var config = require('./psync/config');
+  var configure = require('./psync/configure');
   var PixyAdapter = require('./psync/adapters/pixy');
   var Persistence = require('./psync/persistence');
   var Optimizer = require('./psync/journal_optimizer');
   var exports;
 
   exports = {};
+  exports.configure = configure;
   exports.Journal = Journal;
   exports.Player = Player;
   exports.onError = onError;
@@ -1352,22 +1458,18 @@ define('psync',['require','./psync/error','./psync/journal','./psync/player','./
     Pixy: PixyAdapter
   };
 
-  exports.configure = function(key, value) {
-    var oldValue;
-
-    if (!config.hasOwnProperty(key)) {
-      return onError("Unknown Psync configuration property '" + key + "'");
+  config.on('change', function(key, newValue, oldValue) {
+    if (key === 'enabled' || key === 'adapter') {
+      if (config.adapter) {
+        if (newValue && !oldValue) {
+          config.adapter.install();
+        }
+        else if (!newValue && oldValue) {
+          config.adapter.uninstall();
+        }
+      }
     }
-
-    oldValue = config[key];
-
-    if (value !== undefined) {
-      config[key] = value;
-      config.trigger('change');
-    }
-
-    return oldValue;
-  };
+  });
 
   return exports;
 });
