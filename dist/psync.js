@@ -142,10 +142,14 @@ define('psync/util/remove_by_value',[],function() {
   return function removeByvalue(record, set) {
     var index;
 
-    index = set.indexOf(record);
+    if (set) {
+      index = set.indexOf(record);
 
-    if (index !== -1) {
-      set.splice(index, 1);
+      if (index !== -1) {
+        set.splice(index, 1);
+
+        return true;
+      }
     }
   };
 });
@@ -209,7 +213,7 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
   var config = require('psync/config');
   var Evented = require('psync/util/evented');
   var wrap = require('psync/util/wrap');
-  var remove = require('psync/util/remove_by_value');
+  var removeByValue = require('psync/util/remove_by_value');
   var createProcessor = require('./journal/processors/create');
   var updateProcessor = require('./journal/processors/update');
   var deleteProcessor = require('./journal/processors/delete');
@@ -234,22 +238,6 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
   var append = function(record, opcode, entry) {
     record.operations[opcode] = record.operations[opcode] || [];
     record.operations[opcode].push(entry);
-  };
-
-  /** @internal Remove an operation entry from a record. */
-  var removeEntry = function(record, opcode, entry) {
-    var entries = record.operations[opcode];
-    var index;
-
-    if (entries) {
-      index = entries.indexOf(entry);
-
-      if (index !== -1) {
-        entries.splice(index, 1);
-
-        return true;
-      }
-    }
   };
 
   var Journal = function() {
@@ -326,13 +314,36 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
     },
 
     removeEntry: function(record, opcode, entry) {
-      if (record && entry) {
-        if (removeEntry(record, opcode, entry)) {
-          onChange();
+      if (record && record.operations && entry) {
+        // if (removeByValue(entry, record.operations[opcode])) {
+        //   onChange();
 
-          return true;
-        }
+        //   return true;
+        // }
       }
+    },
+
+    discardProcessed: function(records) {
+      records.forEach(function(record) {
+        keys(record.operations).forEach(function(opcode) {
+          var entries = record.operations[opcode];
+          entries.forEach(function(entry) {
+            var resourceId;
+
+            switch(opcode) {
+              case 'create':
+                resourceId = entry.shadow_id;
+              break;
+
+              case 'update':
+              case 'delete':
+                resourceId = entry.id;
+              break;
+            }
+
+          });
+        });
+      });
     },
 
     clear: function() {

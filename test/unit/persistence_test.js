@@ -38,6 +38,36 @@ define(function(require) {
 
       journal.add('create', user);
       expect(localStorage.journal).toBeFalsy();
-    })
+    });
+
+    describe('#load', function() {
+      it('should overwrite the journal', function() {
+        var dump;
+
+        journal.add('create', user);
+        dump = journal.toJSON();
+        journal.clear();
+
+        localStorage.journal = JSON.stringify(dump);
+        Psync.Persistence.load();
+        expect(journal.length).toEqual(1);
+      });
+
+      it('should not overwrite if the localStorage entry is bad', function() {
+        var onChange = jasmine.createSpy('onChange');
+
+        journal.add('create', user);
+        journal.on('change', onChange);
+
+        localStorage.journal = 'bad json';
+
+        expect(function() {
+          Psync.Persistence.load();
+        }).not.toThrow();
+
+        expect(journal.length).toEqual(1);
+        expect(onChange).not.toHaveBeenCalled();
+      });
+    });
   });
 });
