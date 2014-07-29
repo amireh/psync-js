@@ -223,7 +223,6 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
   var keys = Object.keys;
   var journal;
 
-
   var getRecord = function(path, set) {
     return findWhere(set, { path: path });
   };
@@ -278,9 +277,11 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
         case 'create':
           entry = createProcessor(model);
         break;
+
         case 'update':
           entry = updateProcessor(model);
         break;
+
         case 'delete':
           entry = deleteProcessor(model);
         break;
@@ -303,6 +304,9 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
      * @param  {Object} entry
      *         The entry that was created for this model in #add.
      *
+     * @emit change
+     *       If the entry was found and was removed.
+     *
      * @return {Boolean}
      *         True if the entry was found and was removed.
      */
@@ -310,42 +314,90 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
       var path = config.adapter.getPathFor(model);
       var record = getRecord(path, this.records);
 
-      return this.removeEntry(record, opcode, entry);
-    },
-
-    removeEntry: function(record, opcode, entry) {
       if (record && record.operations && entry) {
-        // if (removeByValue(entry, record.operations[opcode])) {
-        //   onChange();
+        if (removeByValue(entry, record.operations[opcode])) {
+          onChange();
 
-        //   return true;
-        // }
+          return true;
+        }
       }
     },
 
+    removeAt: function(absolutePath, opcode) {
+      var id, path, record, entry;
+      var fragments = absolutePath.split('/');
+
+      id = fragments.pop();
+      path = fragments.join('/');
+      record = this.get(path);
+
+      if (record && record.operations) {
+        entry = findWhere(record.operations[opcode], { id: id });
+
+        if (entry) {
+          if (removeByValue(entry, record.operations[opcode])) {
+            onChange();
+
+            return true;
+          }
+        }
+      }
+    },
+
+    /**
+     * Discard local entries that are referenced in a given set of records. This
+     * can be used to discard entries that were successfully processed after
+     * a COMMIT operation.
+     *
+     * @param  {Object[]} records
+     *         The set of processed journal records.
+     *
+     * @emit change
+     *       If at least one entry was found and was discarded.
+     *
+     * @return {Number}
+     *         The number of entries that were discarded.
+     */
     discardProcessed: function(records) {
+      var getEntries = this.getEntries.bind(this);
+      var discarded = 0;
+      var OPCODE_RESOURCE_ID = {
+        create: 'shadow_id',
+        update: 'id',
+        delete: 'id'
+      };
+
       records.forEach(function(record) {
         keys(record.operations).forEach(function(opcode) {
           var entries = record.operations[opcode];
+          var localEntries = getEntries(record.path, opcode);
+
           entries.forEach(function(entry) {
-            var resourceId;
+            var resourceId = entry[OPCODE_RESOURCE_ID[opcode]];
+            var localEntry;
 
-            switch(opcode) {
-              case 'create':
-                resourceId = entry.shadow_id;
-              break;
+            localEntry = findWhere(localEntries, { id: resourceId });
 
-              case 'update':
-              case 'delete':
-                resourceId = entry.id;
-              break;
+            if (localEntry) {
+              removeByValue(localEntry, localEntries);
+              ++discarded;
             }
-
           });
         });
       });
+
+      if (discarded > 0) {
+        onChange();
+      }
+
+      return discarded;
     },
 
+    /**
+     * Clear the journal. Remove all records.
+     *
+     * @emit change
+     */
     clear: function() {
       if (!this.isEmpty()) {
         this.records = [];
@@ -373,6 +425,13 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
       }
     },
 
+    /**
+     * Serialize the Journal to a JSON construct that conforms to the Psync
+     * commit input specification.
+     *
+     * @return {Object}
+     *         A JSON object you can use to commit the journal.
+     */
     toJSON: function() {
       return { records: this.records };
     },
@@ -384,6 +443,15 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
      * changes to the journal.
      */
     emitChange: function() {
+      onChange();
+    },
+
+    /**
+     * @internal
+     * Directly replace the journal records.
+     */
+    _overwrite: function(dump) {
+      this.records = dump.records || [];
       onChange();
     }
   });
@@ -475,9 +543,14 @@ define('psync/player/resolver',['require','inflection','../error','psync/config'
     };
   };
 
+  var resolveResource = function(path) {
+    return resolveScopeFromChain(path.split('/')).scope;
+  };
+
   exports.resolveScope = resolveScope;
   exports.resolveScopeFromChain = resolveScopeFromChain;
   exports.resolveCollection = resolveCollection;
+  exports.resolveResource = resolveResource;
 
   return exports;
 });
@@ -1012,9 +1085,14 @@ define('psync/adapters/pixy/resolver',['require','lodash'],function(require) {
     }
   };
 
+  var getResource = function(path, id, rootScope) {
+
+  };
+
   exports = {};
   exports.getScope = getScope;
   exports.getConfig = getConfig;
+  exports.getResource = getResource;
 
   return exports;
 });
@@ -1154,11 +1232,12 @@ define('psync/adapters/pixy/model',['require','psync/error','psync/adapters/pixy
 
   return ModelMixin;
 });
-define('psync/adapters/pixy',['require','./pixy/sync','./pixy/resolver','psync/path_builder','./pixy/model'],function(require) {
+define('psync/adapters/pixy',['require','./pixy/sync','./pixy/resolver','psync/path_builder','./pixy/model','psync/player/resolver'],function(require) {
   var Sync = require('./pixy/sync');
   var Resolver = require('./pixy/resolver');
   var mkPath = require('psync/path_builder');
   var ModelMixin = require('./pixy/model');
+  var PlayerResolver = require('psync/player/resolver');
 
   var Adapter = {
     ModelMixin: ModelMixin,
@@ -1181,6 +1260,19 @@ define('psync/adapters/pixy',['require','./pixy/sync','./pixy/resolver','psync/p
 
     getPathFor: function(model) {
       return mkPath(model, Resolver.getConfig, Resolver.getScope);
+    },
+
+    getResourceAt: function(path, id) {
+      var absolutePath;
+
+      if (arguments.length === 1) {
+        absolutePath = path;
+      }
+      else {
+        absolutePath = [ path, id ].join('/');
+      }
+
+      return PlayerResolver.resolveResource(absolutePath);
     },
 
     serialize: function(model, opCode) {
@@ -1228,10 +1320,13 @@ define('psync/persistence',['require','psync/config','psync/journal'],function(r
     var data;
 
     if (serializedJournal) {
-      data = JSON.parse(serializedJournal);
+      try {
+        data = JSON.parse(serializedJournal);
+      } catch(e) {
+        return false;
+      }
 
-      journal.records = data.records || [];
-      journal.emitChange();
+      journal._overwrite(data);
 
       return true;
     }

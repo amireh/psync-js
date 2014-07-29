@@ -122,5 +122,22 @@ define(function(require) {
         });
       });
     });
+
+    describe('#removeAt', function() {
+      it('should work', function() {
+        user.set('id', '1')
+        subject.add('update', user);
+        expect(subject.length).toEqual(1);
+        subject.removeAt('/users/1', 'update');
+        expect(subject.length).toEqual(0);
+      });
+
+      it('should work with shadow ids', function() {
+        subject.add('create', user);
+        expect(subject.length).toEqual(1);
+        subject.removeAt('/users/' + user.cid, 'create');
+        expect(subject.length).toEqual(0);
+      });
+    });
   });
 });
