@@ -267,7 +267,7 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
      *         The journal entry for the model operation. You can keep track of
      *         this if you decide to cancel/undo/remove this from the journal.
      */
-    add: function(opcode, model) {
+    add: function(opcode, model, wantRecord) {
       var set = this.records;
       var path = config.adapter.getPathFor(model);
       var record = getRecord(path, set) || createRecord(path, set);
@@ -293,7 +293,7 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
         onChange();
       }
 
-      return entry;
+      return wantRecord ? { record: record, entry: entry } : entry;
     },
 
     /**
@@ -1015,23 +1015,27 @@ define('psync/adapters/pixy/sync',['require','pixy','lodash','psync/journal','ps
    *         What Pixy.sync returns.
    */
   var journaledSync = function(method, model/*, options*/) {
-    var svc, opcode, entry;
+    var svc, opcode, output, record, entry;
     var isJournalled = result(model, 'isJournalled', model);
 
     if (isJournalled) {
       opcode = opcodeMap[method];
 
       if (opcode) {
-        entry = journal.add(opcode, model);
+        output = journal.add(opcode, model, true);
+        record = output.record;
+        entry = output.entry;
       }
     }
 
     svc = sync.apply(this, arguments);
 
     if (entry && !config.debug) {
+      console.log("Removing entry: ", record.path, entry.id);
+
       // Discard the entry if the operation was committed successfully:
       svc.then(function() {
-        journal.remove(opcode, model, entry);
+        journal.removeAt([ record.path, entry.id ].join('/'), opcode);
       });
 
       // Discard the entry on things like Bad Request.
@@ -1041,7 +1045,7 @@ define('psync/adapters/pixy/sync',['require','pixy','lodash','psync/journal','ps
         xhrError = xhrError || {};
 
         if (contains(config.unrecoverableResponseCodes, xhrError.status)) {
-          journal.remove(opcode, model, entry);
+          journal.removeAt([ record.path, entry.id ].join('/'), opcode);
         }
       });
     }
