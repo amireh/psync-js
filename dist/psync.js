@@ -263,6 +263,11 @@ define('psync/journal',['require','lodash','psync/config','psync/util/evented','
      *        The model being operated on. Must be "journalable", or
      *        recognizable by the PathResolver.
      *
+     * @param {Boolean} wantRecord
+     *        If you need access to the record that contains the added entry,
+     *        pass this to true and you will receive an object that contains
+     *        two properties: "record" and "entry".
+     *
      * @return {Object}
      *         The journal entry for the model operation. You can keep track of
      *         this if you decide to cancel/undo/remove this from the journal.
@@ -1031,8 +1036,6 @@ define('psync/adapters/pixy/sync',['require','pixy','lodash','psync/journal','ps
     svc = sync.apply(this, arguments);
 
     if (entry && !config.debug) {
-      console.log("Removing entry: ", record.path, entry.id);
-
       // Discard the entry if the operation was committed successfully:
       svc.then(function() {
         journal.removeAt([ record.path, entry.id ].join('/'), opcode);
