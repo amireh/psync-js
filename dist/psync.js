@@ -754,8 +754,24 @@ define('psync/player',['require','pixy','rsvp','./player/traverse'],function(req
   var all = RSVP.all;
   var MODE_PLAYBACK = 'playbackMode';
   var MODE_ROLLBACK = 'rollbackMode';
-  var mode, wasItMe;
   var singleton;
+
+  var Playback = function(records, context) {
+    var isRollingBack = context.mode === MODE_ROLLBACK;
+    var createResource = onCreate.bind(this);
+    var deleteResource = onDelete.bind(this);
+    var updateResource = onUpdate.bind(this);
+
+    this.mode = context.mode;
+    this.wasItMe = context.wasItMe;
+
+    return traverse(records, {
+      'postProcess': broadcastEntryDone.bind(this),
+      'create': isRollingBack ? deleteResource : createResource,
+      'update': updateResource,
+      'delete': isRollingBack ? createResource : deleteResource,
+    });
+  };
 
   // Add the resource to our local collection and pull it from the API.
   //
@@ -793,7 +809,8 @@ define('psync/player',['require','pixy','rsvp','./player/traverse'],function(req
     var model = collection.get(resourceId);
 
     if (model) {
-      if (mode === MODE_PLAYBACK && wasItMe) {
+      // Don't re-fetch resources that we've just updated:
+      if (this.mode === MODE_PLAYBACK && this.wasItMe) {
         return RSVP.resolve(resourceId);
       }
 
@@ -826,11 +843,13 @@ define('psync/player',['require','pixy','rsvp','./player/traverse'],function(req
   // Each operation will yield the affected resource id.
   var broadcastEntryDone = function(context, result) {
     var opCode;
+    var isRollingBack = this.mode === MODE_ROLLBACK;
+    var wasItMe = this.wasItMe;
 
     if (result.success) {
       opCode = context.opCode;
 
-      if (mode === MODE_ROLLBACK) {
+      if (isRollingBack) {
         switch(context.opCode) {
           case 'create':
             opCode = 'delete';
@@ -849,7 +868,7 @@ define('psync/player',['require','pixy','rsvp','./player/traverse'],function(req
       [ context.collectionKey + ':' + opCode, 'change' ].forEach(function(event) {
         Emitter.trigger(event, result.output, {
           path: context.path,
-          rollingBack: mode === MODE_ROLLBACK,
+          rollingBack: isRollingBack,
           selfOrigin: !!wasItMe
         });
       });
@@ -918,36 +937,25 @@ define('psync/player',['require','pixy','rsvp','./player/traverse'],function(req
   };
 
   Player.prototype.play = function(journal, selfOrigin) {
-    var svc;
-
-    wasItMe = selfOrigin;
-
-    svc = [];
+    var playback;
+    var svc = [];
 
     if (journal.processed) {
-      mode = MODE_PLAYBACK;
+      playback = new Playback(journal.processed, {
+        mode: MODE_PLAYBACK,
+        wasItMe: selfOrigin
+      });
 
-      svc.concat([
-        traverse(journal.processed || [], {
-          postProcess: broadcastEntryDone,
-          create: onCreate,
-          update: onUpdate,
-          delete: onDelete,
-        })
-      ]);
+      svc.push(playback);
     }
 
     if (journal.dropped && selfOrigin) {
-      mode = MODE_ROLLBACK;
+      playback = new Playback(journal.dropped, {
+        mode: MODE_ROLLBACK,
+        wasItMe: selfOrigin
+      });
 
-      svc.concat([
-        traverse(journal.dropped || [], {
-          postProcess: broadcastEntryDone,
-          create: onDelete,
-          update: onUpdate,
-          delete: onCreate,
-        })
-      ]);
+      svc.push(playback);
     }
 
     return all(svc);
