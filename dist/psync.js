@@ -71,6 +71,13 @@ define('psync/config',['require','lodash','./util/evented'],function(require) {
 
   config.debug = false;
 
+  /**
+   * @cfg {Boolean} ignoreSingularResources
+   *
+   * Ignore models that are not contained within a collection.
+   */
+  config.ignoreSingularResources = false;
+
   config.optimized = true;
   config.optimizer = {
     /**
@@ -1160,9 +1167,10 @@ define('psync/path_builder',['require','lodash','psync/error'],function(require)
 
   return mkPath;
 });
-define('psync/adapters/pixy/model',['require','psync/error','psync/adapters/pixy/resolver'],function(require) {
+define('psync/adapters/pixy/model',['require','psync/error','psync/adapters/pixy/resolver','psync/config'],function(require) {
   var onError = require('psync/error');
   var Resolver = require('psync/adapters/pixy/resolver');
+  var config = require('psync/config');
 
   var ModelMixin = {
     psync: {
@@ -1221,7 +1229,9 @@ define('psync/adapters/pixy/model',['require','psync/error','psync/adapters/pixy
 
     __initialize__: function() {
       if (!this.collection) {
-        onError("Psync model must belong to a collection.");
+        if (!config.ignoreSingularResources) {
+          onError("Psync model must belong to a collection.");
+        }
       }
     },
 
